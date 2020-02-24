@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
 __all__ = [
+    'read_rgb_f32',
     'read_grayscale_f32'
 ]
 
@@ -11,16 +12,23 @@ import pims
 
 
 @pims.pipeline
-def _to_gray_float32(rgb):
-    rgb = (rgb / 255.0).astype(np.float32)
+def _to_float32(rgb):
+    return (rgb / 255.0).astype(np.float32)
+
+
+@pims.pipeline
+def _to_grayscale(rgb):
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
 
 
+def read_rgb_f32(path_to_sequence: str) -> pims.FramesSequence:
+    return _to_float32(pims.open(path_to_sequence))
+
+
 def read_grayscale_f32(path_to_sequence: str) -> pims.FramesSequence:
-    return _to_gray_float32(pims.open(path_to_sequence))
+    return _to_grayscale(read_rgb_f32(path_to_sequence))
 
 
-# pylint:disable=no-value-for-parameter
 @click.command()
 @click.argument('frame_sequence')
 def _cli(frame_sequence):
@@ -33,4 +41,4 @@ def _cli(frame_sequence):
 
 
 if __name__ == '__main__':
-    _cli()
+    _cli()  # pylint:disable=no-value-for-parameter

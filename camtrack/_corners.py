@@ -116,6 +116,10 @@ class CornerStorage(abc.ABC):
     def __iter__(self):
         pass
 
+    @abc.abstractmethod
+    def max_corner_id(self):
+        pass
+
 
 class StorageImpl(CornerStorage):
     """
@@ -128,6 +132,7 @@ class StorageImpl(CornerStorage):
         """
         super().__init__()
         self._corners = list(corners_for_each_frame)
+        self._max_id = max(c.ids.max() for c in self._corners)
 
     def __getitem__(self, frame: int) -> FrameCorners:
         return self._corners[frame]
@@ -137,6 +142,9 @@ class StorageImpl(CornerStorage):
 
     def __iter__(self):
         return iter(self._corners)
+
+    def max_corner_id(self):
+        return self._max_id
 
 
 class StorageFilter(CornerStorage):
@@ -163,6 +171,9 @@ class StorageFilter(CornerStorage):
     def __iter__(self):
         for frame in range(len(self)):  # pylint:disable=consider-using-enumerate
             yield self[frame]
+
+    def max_corner_id(self):
+        return self._storage.max_corner_id()
 
 
 def without_short_tracks(corner_storage: CornerStorage,
@@ -232,7 +243,8 @@ def create_cli(build):
             dump(corner_storage, file_to_dump)
         if show:
             click.echo(
-                "Press 'q' to stop, 'd' to go forward, 'a' to go backward, 'r' to restart the video"
+                "Press 'q' to stop, 'd' to go forward, 'a' to go backward, "
+                "'r' to reset"
             )
             frame = 0
             while True:
@@ -244,9 +256,9 @@ def create_cli(build):
                     frame -= 1
                 if key == 'd' and frame + 1 < len(corner_storage):
                     frame += 1
-                if key == 'r':
-                    frame = 0
                 if key == 'q':
                     break
+                if key == 'r':
+                    frame = 0
 
     return cli
