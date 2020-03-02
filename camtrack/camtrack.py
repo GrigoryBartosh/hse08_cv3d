@@ -28,11 +28,11 @@ from _camtrack import (
 )
 
 TRIANGULATION_PARAMETERS = TriangulationParameters(
-    max_reprojection_error=3,
+    max_reprojection_error=10,
     min_triangulation_angle_deg=1,
     min_depth=0
 )
-PNP_REPROJECTION_ERROR = 3
+PNP_REPROJECTION_ERROR = 10
 RANSAC_ITERATIONS = 100
 
 
@@ -71,11 +71,6 @@ def find_view(points_3d: np.ndarray,
     points_3d = points_3d[corners.ids.reshape(-1)]
     
     points_2d = corners.points
-    #points_2d = cv2.undistortPoints(
-    #    points_2d.reshape(-1, 1, 2),
-    #    intrinsic_mat,
-    #    np.array([])
-    #).reshape(-1, 2)
 
     detected_point_ids = get_detected_point_ids(points_3d)
     points_3d = points_3d[detected_point_ids].astype(np.float32)
@@ -105,8 +100,17 @@ def find_new_points(view_mats: np.ndarray,
     corners_cur = corner_storage[cur_frame_num]
 
     new_points_3d, new_point_ids = np.zeros((0, 3)), np.array([], dtype=int)
-    for frame_i in range(cur_frame_num):
-        view_i = view_mats[frame_i].astype(np.float32)
+
+    frame_ids = list(range(0, cur_frame_num)) + \
+                list(range(cur_frame_num + 1, len(view_mats)))
+    frame_ids.sort(key=lambda i: abs(cur_frame_num - i), reverse=True)
+
+    for frame_i in frame_ids:
+        view_i = view_mats[frame_i]
+        if view_i[0, 0] is None:
+            continue
+
+        view_i = view_i.astype(np.float32)
         corners_i = corner_storage[frame_i]
 
         correspondences = build_correspondences(corners_i, corners_cur,
@@ -132,7 +136,8 @@ def track(intrinsic_mat: np.ndarray,
           known_view_1: Tuple[int, Pose],
           known_view_2: Tuple[int, Pose]) \
         -> Tuple[np.ndarray, np.ndarray]:
-    assert known_view_1[0] == 0
+    if known_view_1[0] > known_view_2[0]:
+        known_view_1, known_view_2 = known_view_2, known_view_1
 
     n_frames = len(corner_storage)
     view_mats = np.full((n_frames, 3, 4), None)
@@ -145,9 +150,13 @@ def track(intrinsic_mat: np.ndarray,
     view_mats[known_view_1[0]] = pose_to_view_mat3x4(known_view_1[1])
     points_3d[new_point_ids] = new_points_3d
 
-    print(f'1 of {n_frames}   {len(new_point_ids)} triangulated   {len(new_point_ids)} in cloud')
+    print(f'2 of {n_frames}   {len(new_point_ids)} triangulated   {len(new_point_ids)} in cloud')
 
-    for frame_num in range(1, n_frames):
+    frame_ids = list(range(known_view_1[0] + 1, known_view_2[0])) + \
+                list(range(known_view_2[0] + 1, n_frames)) + \
+                list(range(known_view_1[0]))[::-1]
+
+    for i, frame_num in enumerate(frame_ids, 3):
         corners = corner_storage[frame_num]
         view, inliers_cnt = find_view(points_3d, corners, intrinsic_mat)
         view_mats[frame_num] = view
@@ -160,7 +169,7 @@ def track(intrinsic_mat: np.ndarray,
                                                        frame_num)
         points_3d[new_point_ids] = new_points_3d
 
-        print(f'{frame_num + 1} of {n_frames}   {inliers_cnt} inliers   '
+        print(f'{i} of {n_frames}   {inliers_cnt} inliers   '
               f'{len(new_point_ids)} triangulated   '
               f'{len(detected_point_ids) + len(new_point_ids)} in cloud')
 
