@@ -28,11 +28,11 @@ from _camtrack import (
 )
 
 TRIANGULATION_PARAMETERS = TriangulationParameters(
-    max_reprojection_error=10,
-    min_triangulation_angle_deg=0,
+    max_reprojection_error=3,
+    min_triangulation_angle_deg=1,
     min_depth=0
 )
-PNP_REPROJECTION_ERROR = 10
+PNP_REPROJECTION_ERROR = 3
 RANSAC_ITERATIONS = 100
 
 
