@@ -2,15 +2,17 @@ __all__ = [
     'Correspondences',
     'PointCloudBuilder',
     'TriangulationParameters',
+    'remove_correspondences_with_ids',
     'build_correspondences',
     'calc_point_cloud_colors',
-    'calc_inlier_indices',
+    'calc_inliers_mask',
     'check_inliers_mask',
     'check_baseline',
     'compute_reprojection_errors',
     'create_cli',
     'draw_residuals',
     'eye3x4',
+    'to_homogeneous',
     'project_points',
     'rodrigues_and_translation_to_view_mat3x4',
     'to_camera_center',
@@ -73,12 +75,12 @@ def pose_to_view_mat3x4(pose: Pose) -> np.ndarray:
     ))
 
 
-def _to_homogeneous(points):
+def to_homogeneous(points):
     return np.pad(points, ((0, 0), (0, 1)), 'constant', constant_values=(1,))
 
 
 def project_points(points3d: np.ndarray, proj_mat: np.ndarray) -> np.ndarray:
-    points3d = _to_homogeneous(points3d)
+    points3d = to_homogeneous(points3d)
     points2d = np.dot(proj_mat, points3d.T)
     points2d /= points2d[[2]]
     return points2d[:2].T
@@ -91,16 +93,28 @@ def compute_reprojection_errors(points3d: np.ndarray, points2d: np.ndarray,
     return np.linalg.norm(points2d_diff, axis=1)
 
 
-def calc_inlier_indices(points3d: np.ndarray, points2d: np.ndarray,
-                        proj_mat: np.ndarray, max_error: float) -> np.ndarray:
+def calc_inliers_mask(points3d: np.ndarray, points2d: np.ndarray,
+                      proj_mat: np.ndarray, max_error: float) -> np.ndarray:
     errors = compute_reprojection_errors(points3d, points2d, proj_mat)
     mask = (errors <= max_error).flatten()
-    indices = np.nonzero(mask)
-    return indices[0]
+    return mask
 
 
-def to_camera_center(view_mat):
-    return view_mat[:, :3].T @ -view_mat[:, 3]
+def to_camera_center(view_mats):
+    squeeze_axis_0 = False
+    if len(view_mats.shape) == 2:
+        view_mats = np.expand_dims(view_mats, axis=0)
+        squeeze_axis_0 = True
+
+    r = view_mats[:, :, :3]
+    t = view_mats[:, :, 3]
+
+    r = r.transpose(0, 2, 1)
+    t = np.expand_dims(-t, axis=2)
+
+    centers = (r @ t).reshape(-1, 3)
+
+    return centers.squeeze() if squeeze_axis_0 else centers
 
 
 def _calc_triangulation_angle_mask(view_mat_1: np.ndarray,
@@ -128,7 +142,7 @@ TriangulationParameters = namedtuple(
 )
 
 
-def _remove_correspondences_with_ids(correspondences: Correspondences,
+def remove_correspondences_with_ids(correspondences: Correspondences,
                                      ids_to_remove: np.ndarray) \
         -> Correspondences:
     ids = correspondences.ids.flatten()
@@ -154,12 +168,12 @@ def build_correspondences(corners_1: FrameCorners, corners_2: FrameCorners,
         corners_2.points[indices_2]
     )
     if ids_to_remove is not None:
-        corrs = _remove_correspondences_with_ids(corrs, ids_to_remove)
+        corrs = remove_correspondences_with_ids(corrs, ids_to_remove)
     return corrs
 
 
 def _calc_z_mask(points3d, view_mat, min_depth):
-    points3d = _to_homogeneous(points3d)
+    points3d = to_homogeneous(points3d)
     points3d_in_camera_space = np.dot(view_mat, points3d.T)
     return points3d_in_camera_space[2].flatten() >= min_depth
 
