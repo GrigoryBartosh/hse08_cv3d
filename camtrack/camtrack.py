@@ -40,9 +40,11 @@ from _camtrack import (
 EPS = 1e-8
 
 MAX_EPIPOL_LINE_DIST = 1
-MAX_REPROJECTION_ERROR = 10
+MAX_REPROJECTION_ERROR = 1
 MIN_TRIANGULATION_ANGLE_DEG = 1
 RANSAC_P = 0.999
+
+MAX_POINT_CLOUD_SIZE = 200000
 
 TRIANGULATION_PARAMETERS = TriangulationParameters(
     max_reprojection_error=MAX_REPROJECTION_ERROR,
@@ -453,6 +455,43 @@ class PointStorage():
         ids = np.where(mask == False)[0]
         point_cloud = self._points3d[ids].astype(np.float64)
         return ids, point_cloud
+
+    def truncate_point_cloud(self, new_cloud_size: int) -> None:
+        if new_cloud_size >= self._point_cloud_size:
+            return
+
+        self.process_all_events()
+
+        mask_undetected_points = (self._points3d[:, 0] == None)
+        undetected_point_ids = np.where(mask_undetected_points == True)[0]
+        detected_point_ids = np.where(mask_undetected_points == False)[0]
+
+        remain_detected_points = np.random.choice(
+            self._point_cloud_size,
+            new_cloud_size,
+            replace=False
+        )
+
+        detected_point_ids = detected_point_ids[remain_detected_points]
+        point_ids = np.concatenate((undetected_point_ids, detected_point_ids), axis=0)
+
+        self._n_points = len(point_ids)
+        self._point_cloud_size = new_cloud_size
+        self._points3d = self._points3d[point_ids]
+        self._point_sizes = self._point_sizes[point_ids]
+        self._point_first_frames = self._point_first_frames[point_ids]
+        self._point_last_frames = self._point_last_frames[point_ids]
+        self._points2d = np.array(self._points2d)[point_ids].tolist()
+
+        self._frame_point_ids = [np.zeros((0,), dtype=np.int32) for _ in range(self._n_frames)]
+        for point_id in range(self._n_points):
+            for frame_id in range(self._point_first_frames[point_id],
+                                  self._point_last_frames[point_id]):
+                self._frame_point_ids[frame_id] = np.concatenate(
+                    (self._frame_point_ids[frame_id],
+                     np.array([point_id], dtype=np.int32)),
+                    axis=0
+                )
 
     def corresponding_view_point(self, detected) \
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -998,7 +1037,7 @@ def rodrigues_to_rot(r: np.ndarray) -> np.ndarray:
     return R
 
 
-def bundle_adjustment_fun(params: np.ndarray, 
+def bundle_adjustment_fun(params: np.ndarray,
                           n_cameras: int,
                           n_points: int,
                           camera_indices: np.ndarray,
@@ -1052,7 +1091,7 @@ def bundle_adjustment(view_mats: np.ndarray,
     R = view_mats[:, :, :3]
     t = view_mats[:, :, 3]
     r = rot_to_rodrigues(R)
-    camera_params = np.concatenate((r, t), axis=1)    
+    camera_params = np.concatenate((r, t), axis=1)
 
     x0 = np.concatenate((camera_params.reshape(-1), points3d.reshape(-1)))
 
@@ -1073,7 +1112,7 @@ def bundle_adjustment(view_mats: np.ndarray,
         verbose=2,
         x_scale='jac',
         ftol=1e-4,
-        method='trf',            
+        method='trf',
         args=(n_cameras, n_points, camera_indices, point_indices, points2d)
     )
 
@@ -1110,7 +1149,7 @@ def optimize(view_mats: np.ndarray,
     point_storage.set_3d(point_ids, points3d)
 
     return view_mats
-    
+
 
 def track(intrinsic_mat: np.ndarray,
           corner_storage: CornerStorage,
@@ -1177,6 +1216,7 @@ def track(intrinsic_mat: np.ndarray,
               f'{point_storage.point_cloud_size()} in cloud')
 
     point_storage.process_all_events()
+    point_storage.truncate_point_cloud(MAX_POINT_CLOUD_SIZE)
     view_mats = optimize(view_mats, point_storage, intrinsic_mat)
 
     return (view_mats, *point_storage.point_cloud(), point_storage.build_corner_storage())
